@@ -1,123 +1,133 @@
-# create vpc
+########################################
+# Create VPC
+########################################
 resource "aws_vpc" "vpc" {
-  cidr_block              = var.vpc_cidr
-  instance_tenancy        = "default"
-  enable_dns_hostnames    = true
-  enable_dns_support =  true
+  cidr_block           = var.vpc_cidr
+  instance_tenancy     = "default"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
 
-  tags      = {
-    Name    = "${var.project_name}-vpc"
+  tags = {
+    Name = "${var.project_name}-vpc"
   }
 }
 
-# create internet gateway and attach it to vpc
+########################################
+# Create Internet Gateway
+########################################
 resource "aws_internet_gateway" "internet_gateway" {
-  vpc_id    = aws_vpc.vpc.id
+  vpc_id = aws_vpc.vpc.id
 
-  tags      = {
-    Name    = "${var.project_name}-igw"
+  tags = {
+    Name = "${var.project_name}-igw"
   }
 }
 
-# use data source to get all avalablility zones in region
+########################################
+# Get Availability Zones
+########################################
 data "aws_availability_zones" "available_zones" {}
 
-# create public subnet pub_sub_1a
+########################################
+# Create Public Subnet
+########################################
 resource "aws_subnet" "pub_sub_1a" {
   vpc_id                  = aws_vpc.vpc.id
   cidr_block              = var.pub_sub_1a_cidr
   availability_zone       = data.aws_availability_zones.available_zones.names[0]
   map_public_ip_on_launch = true
 
-  tags      = {
-    Name    = "pub_sub_1a"
+  tags = {
+    Name = "public_sub"
   }
 }
 
-# create public subnet pub_sub_2b
-resource "aws_subnet" "pub_sub_2b" {
-  vpc_id                  = aws_vpc.vpc.id
-  cidr_block              = var.pub_sub_2b_cidr
-  availability_zone       = data.aws_availability_zones.available_zones.names[1]
-  map_public_ip_on_launch = true
-
-  tags      = {
-    Name    = "pub_sub_2b"
-  }
-}
-
-
-
-# create route table and add public route
+########################################
+# Create Route Table for Public Subnet
+########################################
 resource "aws_route_table" "public_route_table" {
-  vpc_id       = aws_vpc.vpc.id
+  vpc_id = aws_vpc.vpc.id
 
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.internet_gateway.id
   }
 
-  tags       = {
-    Name     = "Public-rt"
+  tags = {
+    Name = "Public-rt"
   }
 }
 
-# associate public subnet pub-sub-1a to public route table
-resource "aws_route_table_association" "pub-sub-1a_route_table_association" {
-  subnet_id           = aws_subnet.pub_sub_1a.id
-  route_table_id      = aws_route_table.public_route_table.id
+# Associate Public Subnet with Public Route Table
+resource "aws_route_table_association" "pub_sub_1a_association" {
+  subnet_id      = aws_subnet.pub_sub_1a.id
+  route_table_id = aws_route_table.public_route_table.id
 }
 
-# associate public subnet az2 to "public route table"
-resource "aws_route_table_association" "pub-sub-2-b_route_table_association" {
-  subnet_id           = aws_subnet.pub_sub_2b.id
-  route_table_id      = aws_route_table.public_route_table.id
+########################################
+# Allocate Elastic IP for NAT Gateway
+########################################
+resource "aws_eip" "nat" {
+
+  tags = {
+    Name = "${var.project_name}-nat-eip"
+  }
 }
 
-# create private app subnet pri-sub-3a
+########################################
+# Create NAT Gateway in Public Subnet
+########################################
+resource "aws_nat_gateway" "nat" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.pub_sub_1a.id
+
+  tags = {
+    Name = "${var.project_name}-nat-gateway"
+  }
+}
+
+########################################
+# Create Private Subnet
+########################################
 resource "aws_subnet" "pri_sub_3a" {
   vpc_id                   = aws_vpc.vpc.id
   cidr_block               = var.pri_sub_3a_cidr
   availability_zone        = data.aws_availability_zones.available_zones.names[0]
   map_public_ip_on_launch  = false
 
-  tags      = {
-    Name    = "pri-sub-3a"
+  tags = {
+    Name = "private_sub"
   }
 }
 
-# create private app pri-sub-4b
-resource "aws_subnet" "pri_sub_4b" {
-  vpc_id                   = aws_vpc.vpc.id
-  cidr_block               = var.pri_sub_4b_cidr
-  availability_zone        = data.aws_availability_zones.available_zones.names[1]
-  map_public_ip_on_launch  = false
+########################################
+# Get Default (Main) Route Table
+########################################
+data "aws_route_table" "main" {
+  filter {
+    name   = "vpc-id"
+    values = [aws_vpc.vpc.id]
+  }
 
-  tags      = {
-    Name    = "pri-sub-4b"
+  filter {
+    name   = "association.main"
+    values = ["true"]
   }
 }
 
-# create private data subnet pri-sub-5a
-resource "aws_subnet" "pri_sub_5a" {
-  vpc_id                   = aws_vpc.vpc.id
-  cidr_block               = var.pri_sub_5a_cidr
-  availability_zone        = data.aws_availability_zones.available_zones.names[0]
-  map_public_ip_on_launch  = false
-
-  tags      = {
-    Name    = "pri-sub-5a"
-  }
+########################################
+# Add NAT Gateway route to Default Route Table
+########################################
+resource "aws_route" "private_nat_route" {
+  route_table_id         = data.aws_route_table.main.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.nat.id
 }
 
-# create private data subnet pri-sub-6-b
-resource "aws_subnet" "pri_sub_6b" {
-  vpc_id                   = aws_vpc.vpc.id
-  cidr_block               = var.pri_sub_6b_cidr
-  availability_zone        = data.aws_availability_zones.available_zones.names[1]
-  map_public_ip_on_launch  = false
-
-  tags      = {
-    Name    = "pri-sub-6b"
-  }
+########################################
+# Explicitly Associate Private Subnet to Default Route Table (optional)
+########################################
+resource "aws_route_table_association" "pri_sub_3a_main" {
+  subnet_id      = aws_subnet.pri_sub_3a.id
+  route_table_id = data.aws_route_table.main.id
 }

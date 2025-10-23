@@ -1,8 +1,8 @@
 terraform {
   backend "s3" {
-    bucket = "tfstate-piyush-101"
-    key    = "backend/10weeksofcloudops-demo.tfstate"
-    region = "us-east-1"
-    dynamodb_table = "remote-backend"
+    bucket         = "terraform-poc-209"
+    key            = "poc-29/demo.tfstate"
+    region         = "us-east-1"
+    #dynamodb_table = "terraform-locks"
   }
 }
